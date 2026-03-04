@@ -314,6 +314,7 @@ def build_cycle_summary_message(
     unchanged_subjects: list[str],
     baseline_subjects: list[str],
     failed_subjects: list[str],
+    successful_metrics: list[tuple[str, dict[str, Any]]],
 ) -> str:
     lines = [
         "Mettl monitor cycle complete",
@@ -340,6 +341,21 @@ def build_cycle_summary_message(
                 *[f"- {subject}" for subject in failed_subjects],
             ]
         )
+    if successful_metrics:
+        lines.extend(["", "Current metrics:"])
+        for subject, metrics in successful_metrics:
+            marks_scored = parse_optional_float(metrics.get("marks_scored"))
+            marks_out_of = parse_optional_float(metrics.get("marks_out_of"))
+            percentage = parse_optional_float(metrics.get("percentage"))
+            percentile = parse_optional_float(metrics.get("percentile"))
+            lines.extend(
+                [
+                    f"- {subject}",
+                    f"  Marks: {format_value(marks_scored)}/{format_value(marks_out_of)}",
+                    f"  Percentage: {format_value(percentage, '%')}",
+                    f"  Percentile: {format_value(percentile)}",
+                ]
+            )
     return "\n".join(lines)
 
 
@@ -391,6 +407,7 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
     unchanged_subjects: list[str] = []
     baseline_subjects: list[str] = []
     failed_subjects: list[str] = []
+    successful_metrics: list[tuple[str, dict[str, Any]]] = []
     attempt_time = utc_now_iso()
 
     async with async_playwright() as playwright:
@@ -417,6 +434,7 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
                     "last_error": None,
                     "last_error_at": None,
                 }
+                successful_metrics.append((subject, current_metrics_dict))
 
                 if previous_metrics and metrics_changed(previous_metrics, current_metrics_dict):
                     updates.append(build_message(subject, url, previous_metrics, current_metrics_dict, attempt_time))
@@ -453,6 +471,7 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
             unchanged_subjects=unchanged_subjects,
             baseline_subjects=baseline_subjects,
             failed_subjects=failed_subjects,
+            successful_metrics=successful_metrics,
         )
     )
 
