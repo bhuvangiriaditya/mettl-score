@@ -1,0 +1,57 @@
+name: Mettl Monitor
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Restore previous scrape state
+        id: state-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: mettl-state.json
+          key: mettl-state-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            mettl-state-${{ github.repository }}-${{ github.ref_name }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Write runtime credentials
+        env:
+          METTL_CREDENTIALS_JSON: ${{ secrets.METTL_CREDENTIALS_JSON }}
+        run: |
+          if [ -z "$METTL_CREDENTIALS_JSON" ]; then
+            echo "Missing repository secret: METTL_CREDENTIALS_JSON"
+            exit 1
+          fi
+          printf '%s' "$METTL_CREDENTIALS_JSON" > mettl-credentials.json
+
+      - name: Run monitor once
+        run: python monitor_mettl.py --log-level INFO
+
+      - name: Save scrape state
+        if: always() && hashFiles('mettl-state.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: mettl-state.json
+          key: mettl-state-${{ github.repository }}-${{ github.ref_name }}-${{ github.run_id }}
