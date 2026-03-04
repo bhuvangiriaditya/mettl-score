@@ -233,8 +233,8 @@ def almost_equal(a: Optional[float], b: Optional[float], tolerance: float = 1e-6
     return abs(a - b) <= tolerance
 
 
-def metrics_changed(previous: dict[str, Any], current: dict[str, Any]) -> bool:
-    fields = ("marks_scored", "marks_out_of", "percentage", "percentile")
+def marks_changed(previous: dict[str, Any], current: dict[str, Any]) -> bool:
+    fields = ("marks_scored", "marks_out_of")
     for field in fields:
         prev_val = parse_optional_float(previous.get(field))
         curr_val = parse_optional_float(current.get(field))
@@ -307,58 +307,6 @@ def build_message(
     return "\n".join(lines)
 
 
-def build_cycle_summary_message(
-    checked_at_utc: str,
-    total_subjects: int,
-    changed_subjects: list[str],
-    unchanged_subjects: list[str],
-    baseline_subjects: list[str],
-    failed_subjects: list[str],
-    successful_metrics: list[tuple[str, dict[str, Any]]],
-) -> str:
-    lines = [
-        "Mettl monitor cycle complete",
-        f"Checked at (UTC): {checked_at_utc}",
-        f"Subjects checked: {total_subjects}",
-        f"Updates detected: {len(changed_subjects)}",
-        f"No changes: {len(unchanged_subjects)}",
-        f"Initial baselines: {len(baseline_subjects)}",
-        f"Failures: {len(failed_subjects)}",
-    ]
-    if changed_subjects:
-        lines.extend(
-            [
-                "",
-                "Updated subjects:",
-                *[f"- {subject}" for subject in changed_subjects],
-            ]
-        )
-    if failed_subjects:
-        lines.extend(
-            [
-                "",
-                "Failed subjects:",
-                *[f"- {subject}" for subject in failed_subjects],
-            ]
-        )
-    if successful_metrics:
-        lines.extend(["", "Current metrics:"])
-        for subject, metrics in successful_metrics:
-            marks_scored = parse_optional_float(metrics.get("marks_scored"))
-            marks_out_of = parse_optional_float(metrics.get("marks_out_of"))
-            percentage = parse_optional_float(metrics.get("percentage"))
-            percentile = parse_optional_float(metrics.get("percentile"))
-            lines.extend(
-                [
-                    f"- {subject}",
-                    f"  Marks: {format_value(marks_scored)}/{format_value(marks_out_of)}",
-                    f"  Percentage: {format_value(percentage, '%')}",
-                    f"  Percentile: {format_value(percentile)}",
-                ]
-            )
-    return "\n".join(lines)
-
-
 def send_telegram_message(bot_token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
@@ -387,7 +335,7 @@ async def scrape_subject(page: Page, subject: str, url: str, credentials: dict[s
     return await scrape_metrics(page)
 
 
-async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, headless: bool) -> tuple[int, int]:
+async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, headless: bool) -> int:
     links = load_links(links_file)
     credentials = load_json_file(credentials_file)
     if not isinstance(credentials, dict):
@@ -403,11 +351,6 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
         state = {}
 
     updates: list[str] = []
-    changed_subjects: list[str] = []
-    unchanged_subjects: list[str] = []
-    baseline_subjects: list[str] = []
-    failed_subjects: list[str] = []
-    successful_metrics: list[tuple[str, dict[str, Any]]] = []
     attempt_time = utc_now_iso()
 
     async with async_playwright() as playwright:
@@ -434,21 +377,16 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
                     "last_error": None,
                     "last_error_at": None,
                 }
-                successful_metrics.append((subject, current_metrics_dict))
 
-                if previous_metrics and metrics_changed(previous_metrics, current_metrics_dict):
+                if previous_metrics and marks_changed(previous_metrics, current_metrics_dict):
                     updates.append(build_message(subject, url, previous_metrics, current_metrics_dict, attempt_time))
-                    changed_subjects.append(subject)
-                    logging.info("Change detected for %s", subject)
+                    logging.info("Marks change detected for %s", subject)
                 elif previous_metrics is None:
-                    baseline_subjects.append(subject)
                     logging.info("Initial baseline saved for %s", subject)
                 else:
-                    unchanged_subjects.append(subject)
-                    logging.info("No metric changes for %s", subject)
+                    logging.info("No marks change for %s", subject)
             except Exception as exc:
                 logging.exception("Failed to scrape %s", subject)
-                failed_subjects.append(subject)
                 state[subject] = {
                     "link": url,
                     "metrics": previous_metrics,
@@ -462,26 +400,11 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
 
     write_json_file(state_file, state)
 
-    messages_to_send = [*updates]
-    messages_to_send.append(
-        build_cycle_summary_message(
-            checked_at_utc=attempt_time,
-            total_subjects=len(links),
-            changed_subjects=changed_subjects,
-            unchanged_subjects=unchanged_subjects,
-            baseline_subjects=baseline_subjects,
-            failed_subjects=failed_subjects,
-            successful_metrics=successful_metrics,
-        )
-    )
-
-    telegram_messages_sent = 0
-    for message in messages_to_send:
+    for message in updates:
         send_telegram_message(str(bot_token), str(chat_id), message)
         logging.info("Telegram message sent")
-        telegram_messages_sent += 1
 
-    return len(updates), telegram_messages_sent
+    return len(updates)
 
 
 async def monitor(args: argparse.Namespace) -> None:
@@ -489,17 +412,13 @@ async def monitor(args: argparse.Namespace) -> None:
     credentials_file = Path(args.credentials_file)
     state_file = Path(args.state_file)
 
-    update_alerts, telegram_messages_sent = await run_cycle(
+    updates = await run_cycle(
         links_file=links_file,
         credentials_file=credentials_file,
         state_file=state_file,
         headless=not args.headed,
     )
-    logging.info(
-        "Cycle complete. Update alerts sent: %d, Telegram messages sent: %d",
-        update_alerts,
-        telegram_messages_sent,
-    )
+    logging.info("Cycle complete. Telegram updates sent: %d", updates)
 
 
 def parse_args() -> argparse.Namespace:
