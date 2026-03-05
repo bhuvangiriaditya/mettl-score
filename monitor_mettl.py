@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -382,7 +383,8 @@ async def run_cycle(links_file: Path, credentials_file: Path, state_file: Path, 
                     updates.append(build_message(subject, url, previous_metrics, current_metrics_dict, attempt_time))
                     logging.info("Marks change detected for %s", subject)
                 elif previous_metrics is None:
-                    logging.info("Initial baseline saved for %s", subject)
+                    updates.append(build_message(subject, url, {}, current_metrics_dict, attempt_time))
+                    logging.info("Initial baseline saved and notification sent for %s", subject)
                 else:
                     logging.info("No marks change for %s", subject)
             except Exception as exc:
@@ -428,15 +430,19 @@ def parse_args() -> argparse.Namespace:
             "and send Telegram alerts on score changes."
         )
     )
-    parser.add_argument("--links-file", default=DEFAULT_LINKS_FILE, help="Path to subject->URL JSON file.")
+    parser.add_argument(
+        "--links-file",
+        default=os.getenv("METTL_LINKS_FILE", DEFAULT_LINKS_FILE),
+        help="Path to subject->URL JSON file.",
+    )
     parser.add_argument(
         "--credentials-file",
-        default=DEFAULT_CREDENTIALS_FILE,
+        default=os.getenv("METTL_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE),
         help="Path to login + Telegram credentials JSON file.",
     )
     parser.add_argument(
         "--state-file",
-        default=DEFAULT_STATE_FILE,
+        default=os.getenv("METTL_STATE_FILE", DEFAULT_STATE_FILE),
         help="Path to local state JSON file used for previous scrape comparison.",
     )
     parser.add_argument("--headed", action="store_true", help="Run browser with visible UI for debugging.")

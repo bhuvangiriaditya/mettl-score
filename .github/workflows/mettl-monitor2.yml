@@ -11,9 +11,9 @@ jobs:
     permissions:
       contents: read
     env:
-      METTL_LINKS_FILE: mettl-links.json
+      METTL_LINKS_FILE: mettl-links-2.json
       METTL_CREDENTIALS_FILE: mettl-credentials.json
-      METTL_STATE_FILE: mettl-state.json
+      METTL_STATE_FILE: mettl-state-2.json
 
     steps:
       - name: Checkout
@@ -42,7 +42,7 @@ jobs:
 
       - name: Write runtime credentials
         env:
-          METTL_CREDENTIALS_JSON: ${{ secrets.METTL_CREDENTIALS_JSON }}
+          METTL_CREDENTIALS_JSON: ${{ secrets.METTL_CREDENTIALS_2_JSON }}
         run: |
           if [ -z "$METTL_CREDENTIALS_JSON" ]; then
             echo "Missing repository secret: METTL_CREDENTIALS_JSON"
